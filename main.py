@@ -5,6 +5,7 @@ import re
 import random
 import hashlib
 import hmac
+import json
 from string import letters
 
 from google.appengine.ext import db
@@ -95,6 +96,11 @@ class BlogHandler(webapp2.RequestHandler):
     def render(self, template, **kw):
         self.write(self.render_str(template, **kw))
 
+    def render_json(self, d):
+        json_txt = json.dumps(d)
+        self.response.headers['Content-Type'] = 'application/json; charset=UTF-8'
+        self.write(json_txt)
+
     def set_secure_cookie(self, name, val):
         cookie_val = make_secure_val(val)
         self.response.headers.add_header('Set-Cookie', '%s=%s; Path=/' % (name, cookie_val))
@@ -113,6 +119,11 @@ class BlogHandler(webapp2.RequestHandler):
         webapp2.RequestHandler.initialize(self, *a, **kw)
         uid = self.read_secure_cookie('user_id')
         self.user = uid and User.by_id(int(uid))
+
+        if self.request.url.endswith('.json'):
+        	self.format = 'json'
+        else:
+        	self.format = 'html'
 
 
 ### MainPage for test
@@ -254,12 +265,27 @@ class Post(db.Model):
         self._render_text = self.content.replace('\n', '<br>')
         return render_str("post.html", p = self)
 
+    def toDict(self):
+    	time_fmt = '%c'
+        d = {'subject': self.subject,
+             'content': self.content,
+             'created': self.created.strftime(time_fmt),
+             'last_modified': self.last_modified.strftime(time_fmt)}
+        return d
+
+
+## show either html version of json version
 class BlogFront(BlogHandler):
     def get(self):
         posts = Post.all().order('-created')
         #posts = db.GqlQuery("select * from Post order by created desc limit 10")
-        self.render('front.html', posts = posts)
+        if self.format == "html":
+        	self.render('front.html', posts = posts)
+        else:
+        	json_dict = [post.toDict() for post in posts]
+        	self.render_json(json_dict)
 
+## show either html version of json version
 class PostPage(BlogHandler):
     def get(self, post_id):
         key = db.Key.from_path('Post', int(post_id), parent=blog_key())
@@ -271,7 +297,10 @@ class PostPage(BlogHandler):
             self.error(404)
             return
 
-        self.render("permalink.html", post = post)
+        if self.format == "html":
+        	self.render("permalink.html", post = post)
+        else:
+        	self.render_json(post.toDict())
 
 class NewPost(BlogHandler):
     def get(self):
@@ -297,8 +326,8 @@ app = webapp2.WSGIApplication([('/', MainPage),
                                ('/blog/signup', Register),
                                ('/blog/login', Login),
                                ('/blog/logout', Logout),
-                               ('/blog/?', BlogFront),
-                               ('/blog/([0-9]+)', PostPage),
+                               ('/blog/?(?:\.json)?', BlogFront),
+                               ('/blog/([0-9]+)(?:\.json)?', PostPage),
                                ('/blog/newpost', NewPost)
                                ],
                               debug=True)
